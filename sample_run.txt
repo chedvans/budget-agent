@@ -1,0 +1,45 @@
+מטרה: בדוק את ההוצאות שלי בחודש האחרון מול התקציב, ומצא תוכנית מציאותית לחסוך 1,500 ש"ח בחודש הבא.
+מודל: gemini-3.5-flash-lite | מקסימום צעדים: 15
+======================================================================
+[צעד 1] כלי: load_expenses({"file_path": "C:\\Users\\User\\Videos\\agent_bot\\data\\expenses.csv"})
+         -> {"loaded_rows": 41, "skipped_rows": [{"line": 43, "reason": "סכום לא תקין: 'לא-מספר'"}], "period": "2026-10-01 עד 2026-10-31", "total_spent": 13123.6, "categories": ["ביגוד", "בריאות", "חינוך", "חשבונות", "מזון", "מנויים", "מסעדות ובתי קפה", "שונות", "שכירות", "תחבורה"]}
+[צעד 1] כלי: load_budget({"file_path": "C:\\Users\\User\\Videos\\agent_bot\\data\\budget.json"})
+         -> {"monthly_income": 13500, "total_budget": 11500, "categories": {"שכירות": {"limit": 4200, "essential": true, "fixed": true}, "חשבונות": {"limit": 1300, "essential": true, "fixed": false}, "מזון": {"limit": 2800, "essential": true, "fixed": false}, "בריאות": {"limit": 400, "essential": true, "fixed": false}, "תחבורה": {"limit": 750, "essential": false, "fixed": false}, "חינוך": {"limit": 500, "essential": false, "fixed": false}, "מסעדות ובתי קפה": {"limit": 600, "essential": false, "fixed": false}, "ביגוד": {"limit": 500, "essential": false, "fixed": false}, "מנויים": {"limit": 150, "essential" ...[קוצר]
+[צעד 2] כלי: compare_to_budget()
+         -> {"rows": [{"category": "ביגוד", "spent": 1113.0, "limit": 500, "essential": false, "difference": 613.0, "status": "חריגה"}, {"category": "מסעדות ובתי קפה", "spent": 1115.0, "limit": 600, "essential": false, "difference": 515.0, "status": "חריגה"}, {"category": "מזון", "spent": 3028.9, "limit": 2800, "essential": true, "difference": 228.9, "status": "חריגה"}, {"category": "מנויים", "spent": 318.7, "limit": 150, "essential": false, "difference": 168.7, "status": "חריגה"}, {"category": "שונות", "spent": 410.0, "limit": 300, "essential": false, "difference": 110.0, "status": "חריגה"}, {"category": ...[קוצר]
+[צעד 2] כלי: find_recurring()
+         -> {"subscriptions": [{"date": "2026-10-04", "description": "מנוי אחסון בענן", "category": "מנויים", "amount": 29.9}, {"date": "2026-10-05", "description": "מנוי חדר כושר", "category": "מנויים", "amount": 199.0}, {"date": "2026-10-12", "description": "מנוי אפליקציית כושר", "category": "מנויים", "amount": 49.9}, {"date": "2026-10-21", "description": "מנוי עיתון דיגיטלי", "category": "מנויים", "amount": 39.9}], "subscriptions_total": 318.7, "frequent_purchases": [{"description": "סופרמרקט", "times": 5}, {"description": "בית קפה", "times": 5}, {"description": "משלוח אוכל", "times": 5}]}
+[צעד 3] כלי: get_transactions({"category": "ביגוד", "top_n": 5})
+         -> {"category": "ביגוד", "count": 3, "total": 1113.0, "largest": [{"date": "2026-10-17", "description": "חנות נעליים", "category": "ביגוד", "amount": 449.0}, {"date": "2026-10-08", "description": "חנות בגדים", "category": "ביגוד", "amount": 389.0}, {"date": "2026-10-27", "description": "חנות בגדים", "category": "ביגוד", "amount": 275.0}], "grouped_by_description": [{"description": "חנות בגדים", "times": 2, "total": 664.0, "average": 332.0}, {"description": "חנות נעליים", "times": 1, "total": 449.0, "average": 449.0}]}
+[צעד 3] כלי: get_transactions({"category": "מסעדות ובתי קפה", "top_n": 5})
+         -> {"category": "מסעדות ובתי קפה", "count": 11, "total": 1115.0, "largest": [{"date": "2026-10-16", "description": "מסעדה", "category": "מסעדות ובתי קפה", "amount": 265.0}, {"date": "2026-10-23", "description": "משלוח אוכל", "category": "מסעדות ובתי קפה", "amount": 142.0}, {"date": "2026-10-11", "description": "משלוח אוכל", "category": "מסעדות ובתי קפה", "amount": 138.0}, {"date": "2026-10-29", "description": "משלוח אוכל", "category": "מסעדות ובתי קפה", "amount": 131.0}, {"date": "2026-10-07", "description": "משלוח אוכל", "category": "מסעדות ובתי קפה", "amount": 124.0}], "grouped_by_description": ...[קוצר]
+[צעד 3] כלי: get_transactions({"category": "מנויים", "top_n": 5})
+         -> {"category": "מנויים", "count": 4, "total": 318.7, "largest": [{"date": "2026-10-05", "description": "מנוי חדר כושר", "category": "מנויים", "amount": 199.0}, {"date": "2026-10-12", "description": "מנוי אפליקציית כושר", "category": "מנויים", "amount": 49.9}, {"date": "2026-10-21", "description": "מנוי עיתון דיגיטלי", "category": "מנויים", "amount": 39.9}, {"date": "2026-10-04", "description": "מנוי אחסון בענן", "category": "מנויים", "amount": 29.9}], "grouped_by_description": [{"description": "מנוי חדר כושר", "times": 1, "total": 199.0, "average": 199.0}, {"description": "מנוי אפליקציית כושר",  ...[קוצר]
+[צעד 4] כלי: simulate_savings_plan({"cuts": [{"category": "מסעדות ובתי קפה", "reason": "צמצום משלוחים ואכילה בחוץ", "amount": 500}, {"amount": 500, "reason": "הפחתת קניות בגדים ונעליים לא חיוניות", "category": "ביגוד"}, {"category": "מזון", "amount": 300, "reason": "קניות חכמות בסופר והפחתת כפילויות"}, {"category": "מנויים", "amount" ...[קוצר])
+         -> {"target": 1500, "total_saving": 1300.0, "target_reached": false, "missing": 200.0, "accepted_cuts": [{"category": "מסעדות ובתי קפה", "amount": 500.0, "reason": "צמצום משלוחים ואכילה בחוץ", "new_monthly_spend": 615.0}, {"category": "ביגוד", "amount": 500.0, "reason": "הפחתת קניות בגדים ונעליים לא חיוניות", "new_monthly_spend": 613.0}, {"category": "מזון", "amount": 300.0, "reason": "קניות חכמות בסופר והפחתת כפילויות", "new_monthly_spend": 2728.9}], "problems": ["קיצוץ של 63% ב-'מנויים' לא מציאותי (מקסימום 60% לקטגוריה זו). מקסימום אפשרי: 191.22."]}
+[צעד 5] כלי: simulate_savings_plan({"cuts": [{"reason": "צמצום משלוחים ואכילה בחוץ", "category": "מסעדות ובתי קפה", "amount": 550}, {"reason": "הפחתת קניות בגדים ונעליים לא חיוניות", "amount": 550, "category": "ביגוד"}, {"amount": 200, "category": "מזון", "reason": "קניות חכמות בסופר"}, {"amount": 190, "category": "מנויים", "reason_e ...[קוצר])
+         -> {"target": 1500, "total_saving": 1500.0, "target_reached": true, "missing": 0.0, "accepted_cuts": [{"category": "מסעדות ובתי קפה", "amount": 550.0, "reason": "צמצום משלוחים ואכילה בחוץ", "new_monthly_spend": 565.0}, {"category": "ביגוד", "amount": 550.0, "reason": "הפחתת קניות בגדים ונעליים לא חיוניות", "new_monthly_spend": 563.0}, {"category": "מזון", "amount": 200.0, "reason": "קניות חכמות בסופר", "new_monthly_spend": 2828.9}, {"category": "מנויים", "amount": 190.0, "reason": "ביטול מנוי כפול", "new_monthly_spend": 128.7}, {"category": "שונות", "amount": 10.0, "reason": "הפחתה קלה בהוצאות שו ...[קוצר]
+[צעד 6] כלי: finish({"report": "דוח סיכום תקציב חודשי ותוכנית חיסכון:\n\n1. מצב נוכחי:\nבחודש האחרון סך ההוצאות עמד על 13,123.6 ש\"ח מתוך הכנסה של 13,500 ש\"ח (נותר עודף קטן של 376.4 ש\"ח). \nהיו חריגות משמעותיות במספר קטגוריות מרכזיות, ביניהן מסעדות ובתי קפה, ביגוד, מנויים ומזון.\n\n2. היכן היו החריגות ומה גרם להן:\n- ...[קוצר])
+======================================================================
+הסתיים בהצלחה
+
+דוח סיכום תקציב חודשי ותוכנית חיסכון:
+
+1. מצב נוכחי:
+בחודש האחרון סך ההוצאות עמד על 13,123.6 ש"ח מתוך הכנסה של 13,500 ש"ח (נותר עודף קטן של 376.4 ש"ח). 
+היו חריגות משמעותיות במספר קטגוריות מרכזיות, ביניהן מסעדות ובתי קפה, ביגוד, מנויים ומזון.
+
+2. היכן היו החריגות ומה גרם להן:
+- מסעדות ובתי קפה (1,115 ש"ח לעומת תקציב של 600 ש"ח): נבע בעיקר ממשלוחי אוכל תכופים (כ-5 משלוחים בסכום מצטבר של כ-654 ש"ח) וארוחות במסעדות.
+- ביגוד (1,113 ש"ח לעומת תקציב של 500 ש"ח): נבע מרכישות בחנויות בגדים ונעליים.
+- מנויים (318.7 ש"ח לעומת תקציב של 150 ש"ח): החזקה מקבילה של מנוי לחדר כושר, אפליקציית כושר, עיתון דיגיטלי ואחסון בענן.
+- מזון (3,028.9 ש"ח לעומת תקציב של 2,800 ש"ח): קניות שוטפות בסופרמרקט.
+
+3. תוכנית הקיצוצים להשגת יעד החיסכון (1,500 ש"ח):
+- מסעדות ובתי קפה: קיצוץ של 550 ש"ח (מעבר לבישול ביתי והפחתת משלוחים).
+- ביגוד: קיצוץ של 550 ש"ח (דחיית רכישות ביגוד לא דחופות).
+- מזון: קיצוץ של 200 ש"ח (תכנון קניות נבון בסופר).
+- מנויים: קיצוץ של 190 ש"ח (ביטול מנויים כפולים שאינם בשימוש יומיומי).
+- שונות: קיצוץ של 10 ש"ח.
+
+סך החיסכון החודשי המתוכנן: 1,500 ש"ח (היעד הושג בהצלחה).

@@ -1,0 +1,15 @@
+{
+  "monthly_income": 13500,
+  "categories": {
+    "שכירות":            {"limit": 4200, "essential": true, "fixed": true},
+    "חשבונות":           {"limit": 1300, "essential": true},
+    "מזון":              {"limit": 2800, "essential": true},
+    "בריאות":            {"limit": 400,  "essential": true},
+    "תחבורה":            {"limit": 750,  "essential": false},
+    "חינוך":             {"limit": 500,  "essential": false},
+    "מסעדות ובתי קפה":   {"limit": 600,  "essential": false},
+    "ביגוד":             {"limit": 500,  "essential": false},
+    "מנויים":            {"limit": 150,  "essential": false},
+    "שונות":             {"limit": 300,  "essential": false}
+  }
+}
