@@ -16,7 +16,7 @@ import streamlit as st
 
 from agent import (DEFAULT_BUDGET, DEFAULT_EXPENSES, DEFAULT_MODEL, GEMINI_BASE_URL,
                    REQUEST_TIMEOUT, BudgetAgent)
-from tools import BudgetState, run_tool
+from tools import BudgetState, run_tool, upcoming_holidays
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -31,6 +31,7 @@ TOOL_LABELS = {
     "get_transactions": "בדיקת עסקאות",
     "find_recurring": "איתור מנויים קבועים",
     "simulate_savings_plan": "בדיקת תוכנית החיסכון",
+    "holiday_countdown": "חישוב הזמן עד החג (לוח עברי)",
     "finish": "סיכום",
 }
 
@@ -87,6 +88,30 @@ div[data-testid="stHorizontalBlock"] button[kind="secondary"]:hover {
     border-color: #0F766E; color: #0F766E;
 }
 .hint { color: #6B7280; font-size: .9rem; margin-bottom: .4rem; }
+
+/* באנר "מתכוננים לחג" */
+.st-key-holiday_promo {
+    background: linear-gradient(135deg, #0F766E 0%, #134E4A 100%);
+    border-radius: 16px; padding: 1.25rem 1.4rem 1.1rem; margin: 0 0 1.6rem;
+    box-shadow: 0 6px 20px rgba(15, 118, 110, .18);
+}
+.promo-badge {
+    display: inline-block; background: #FDE68A; color: #78350F; font-size: .75rem; font-weight: 700;
+    border-radius: 999px; padding: .12rem .6rem; margin-bottom: .45rem;
+}
+.promo-title { color: #FFFFFF; font-size: 1.35rem; font-weight: 700; margin: 0 0 .3rem; }
+.promo-text { color: #CCFBF1; font-size: .95rem; margin: 0 0 .75rem; line-height: 1.55; }
+.promo-countdown { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .2rem; }
+.promo-chip {
+    background: rgba(255, 255, 255, .12); border: 1px solid rgba(255, 255, 255, .25);
+    color: #FFFFFF; border-radius: 10px; padding: .35rem .7rem; font-size: .85rem;
+}
+.promo-chip b { font-size: 1.05rem; }
+.st-key-holiday_promo div[data-testid="stHorizontalBlock"] button {
+    background: #FFFFFF !important; color: #0F766E !important; border: none !important;
+    font-weight: 600; border-radius: 10px !important;
+}
+.st-key-holiday_promo div[data-testid="stHorizontalBlock"] button:hover { background: #F0FDFA !important; }
 
 section[data-testid="stSidebar"] h3 { font-size: .95rem; font-weight: 600; color: #111827; }
 .model-tag { color: #9CA3AF; font-size: .78rem; margin-top: 1.5rem; direction: ltr; text-align: right; }
@@ -190,6 +215,42 @@ if summary and "error" not in summary:
         ) + "</div>",
         unsafe_allow_html=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# באנר: מתכוננים לחג - הספירה לאחור מחושבת לפי הלוח העברי, בלי לפנות למודל
+# ---------------------------------------------------------------------------
+
+def holiday_prompt(holiday: str) -> str:
+    return f"אני רוצה להתכונן ל{holiday}. עזור לי לתכנן כמה לחסוך בכל חודש עד אז."
+
+
+holidays = upcoming_holidays()
+by_name = {h["holiday"]: h for h in holidays}
+featured = ["פסח", "ראש השנה"]
+if holidays[0]["holiday"] not in featured:  # החג הקרוב ביותר תמיד מוצג
+    featured.insert(0, holidays[0]["holiday"])
+button_label = {"ראש השנה": "חגי תשרי"}
+
+with st.container(key="holiday_promo"):
+    chips = "".join(
+        f'<div class="promo-chip">{button_label.get(n, n)} בעוד <b>{by_name[n]["days_left"]}</b> ימים'
+        f' · {by_name[n]["hebrew_date"]}</div>'
+        for n in featured
+    )
+    st.html(f"""
+        <div class="promo-badge">חדש</div>
+        <div class="promo-title">מתכוננים לחג, בלי לחץ בסוף</div>
+        <div class="promo-text">היועץ מחשב לפי הלוח העברי כמה זמן נשאר עד החג, כמה צריך לחסוך בכל חודש,
+        ובונה תוכנית קיצוצים שנבדקת מול התקציב שלכם. ככה מגיעים לחג מוכנים.</div>
+        <div class="promo-countdown">{chips}</div>
+    """)
+    cols = st.columns(len(featured))
+    for col, name in zip(cols, featured):
+        if col.button(f"תכננו איתי את {button_label.get(name, name)}", key=f"plan_{name}",
+                      icon=":material/event_available:", use_container_width=True):
+            st.session_state.pending = holiday_prompt(button_label.get(name, name))
+            st.rerun()
 
 
 # ---------------------------------------------------------------------------

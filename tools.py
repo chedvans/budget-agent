@@ -16,7 +16,10 @@ import csv
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
+
+from pyluach import dates as hebdates, hebrewcal
 
 
 class ToolError(Exception):
@@ -286,6 +289,90 @@ def simulate_savings_plan(state: BudgetState, target: float, cuts: list[dict]) -
 
 
 # ---------------------------------------------------------------------------
+# חגים - לפי הלוח העברי
+# ---------------------------------------------------------------------------
+
+# חודשים לפי הספרייה pyluach: ניסן=1 ... תשרי=7, כסלו=9, אדר=12 (בשנה מעוברת: אדר ב'=13)
+HOLIDAYS = {
+    "ראש השנה": (7, 1),
+    "סוכות": (7, 15),
+    "חנוכה": (9, 25),
+    "פורים": ("adar", 14),
+    "פסח": (1, 15),
+    "שבועות": (3, 6),
+}
+HOLIDAY_ALIASES = {"חגי תשרי": "ראש השנה", "תשרי": "ראש השנה", "סוכות ושמחת תורה": "סוכות"}
+
+
+def _holiday_date(name: str, hebrew_year: int) -> hebdates.HebrewDate:
+    month, day = HOLIDAYS[name]
+    if month == "adar":  # פורים: בשנה מעוברת חוגגים באדר ב'
+        month = 13 if hebrewcal.Year(hebrew_year).leap else 12
+    return hebdates.HebrewDate(hebrew_year, month, day)
+
+
+def _next_occurrence(name: str, today: date) -> hebdates.HebrewDate:
+    """המועד הקרוב של החג, מהיום והלאה."""
+    today_heb = hebdates.GregorianDate(today.year, today.month, today.day).to_heb()
+    for year in (today_heb.year, today_heb.year + 1):
+        d = _holiday_date(name, year)
+        if d >= today_heb:
+            return d
+    raise ToolError(f"לא נמצא מועד ל{name}.")  # לא אמור לקרות
+
+
+def upcoming_holidays(today: date | None = None) -> list[dict]:
+    """רשימת החגים הקרובים, מהקרוב לרחוק. משמש את הבאנר בממשק (לא כלי של המודל)."""
+    today = today or date.today()
+    result = []
+    for name in HOLIDAYS:
+        heb = _next_occurrence(name, today)
+        greg = heb.to_pydate()
+        result.append({"holiday": name, "date": greg.isoformat(), "days_left": (greg - today).days,
+                       "hebrew_date": heb.hebrew_date_string()})
+    return sorted(result, key=lambda h: h["days_left"])
+
+
+def holiday_countdown(state: BudgetState, holiday: str, amount: float | None = None,
+                      today: str | None = None) -> dict:
+    """
+    כמה זמן נשאר עד החג וכמה חודשי חיסכון יש עד אליו.
+    אם ניתן סכום - מחשב כמה צריך לחסוך בכל חודש (החישוב כאן, לא אצל המודל).
+    """
+    name = HOLIDAY_ALIASES.get(holiday.strip(), holiday.strip())
+    if name not in HOLIDAYS:
+        raise ToolError(f"החג '{holiday}' לא מוכר. חגים נתמכים: {', '.join(HOLIDAYS)}.")
+    try:
+        start = date.fromisoformat(today) if today else date.today()
+    except ValueError as exc:
+        raise ToolError("התאריך today צריך להיות בפורמט YYYY-MM-DD.") from exc
+
+    heb = _next_occurrence(name, start)
+    greg = heb.to_pydate()
+    # חודשי חיסכון: מהחודש הבא ועד חודש החג (כולל). למשל מאוקטובר לאפריל = 6 חודשים
+    months = (greg.year - start.year) * 12 + (greg.month - start.month)
+    result = {
+        "holiday": name,
+        "hebrew_date": heb.hebrew_date_string(),
+        "date": greg.isoformat(),
+        "days_left": (greg - start).days,
+        "saving_months": max(months, 0),
+    }
+    if months <= 0:
+        result["note"] = "החג חל החודש - אין חודשים מלאים לחיסכון לפניו. כדאי לתכנן כבר את החג הבא."
+    if amount is not None:
+        try:
+            amount = float(amount)
+        except (TypeError, ValueError) as exc:
+            raise ToolError("הסכום חייב להיות מספר.") from exc
+        if amount <= 0:
+            raise ToolError("הסכום חייב להיות חיובי.")
+        result["amount"] = round(amount, 2)
+        result["monthly_saving_needed"] = round(amount / max(months, 1), 2)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # הגדרת הכלים עבור OpenAI (function calling)
 # ---------------------------------------------------------------------------
 
@@ -296,6 +383,7 @@ TOOL_FUNCTIONS = {
     "get_transactions": get_transactions,
     "find_recurring": find_recurring,
     "simulate_savings_plan": simulate_savings_plan,
+    "holiday_countdown": holiday_countdown,
 }
 
 TOOL_SCHEMAS = [
@@ -381,6 +469,25 @@ TOOL_SCHEMAS = [
                     },
                 },
                 "required": ["target", "cuts"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "holiday_countdown",
+            "description": (
+                "מחשב לפי הלוח העברי כמה זמן נשאר עד חג וכמה חודשי חיסכון יש עד אליו. "
+                "אם ניתן amount - מחזיר גם כמה צריך לחסוך בכל חודש (monthly_saving_needed). "
+                "חגים: ראש השנה (או חגי תשרי), סוכות, חנוכה, פורים, פסח, שבועות."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "holiday": {"type": "string", "description": "שם החג בעברית"},
+                    "amount": {"type": "number", "description": "הסכום שצריך לחג, בש\"ח"},
+                },
+                "required": ["holiday"],
             },
         },
     },

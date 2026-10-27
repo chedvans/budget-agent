@@ -76,6 +76,29 @@ class ToolTests(unittest.TestCase):
         self.assertEqual(len(r["problems"]), 2)
 
 
+class HolidayTests(unittest.TestCase):
+    """הכלי holiday_countdown - תאריך קבוע (today) כדי שהתוצאה לא תשתנה מיום ליום."""
+
+    def setUp(self):
+        self.s = BudgetState()
+
+    def test_pesach_monthly_saving(self):
+        r = run_tool(self.s, "holiday_countdown", {"holiday": "פסח", "amount": 6000, "today": "2026-10-27"})
+        self.assertEqual(r["date"], "2027-04-22")          # ט"ו ניסן תשפ"ז
+        self.assertEqual(r["saving_months"], 6)            # נובמבר עד אפריל
+        self.assertEqual(r["monthly_saving_needed"], 1000)
+
+    def test_purim_in_leap_year_is_adar_bet(self):
+        r = run_tool(self.s, "holiday_countdown", {"holiday": "פורים", "today": "2026-10-27"})
+        self.assertEqual(r["date"], "2027-03-23")          # תשפ"ז מעוברת - פורים באדר ב'
+
+    def test_alias_and_unknown_holiday(self):
+        r = run_tool(self.s, "holiday_countdown", {"holiday": "חגי תשרי", "today": "2026-10-27"})
+        self.assertEqual(r["holiday"], "ראש השנה")
+        self.assertIn("error", run_tool(self.s, "holiday_countdown", {"holiday": "יום הולדת"}))
+        self.assertIn("error", run_tool(self.s, "holiday_countdown", {"holiday": "פסח", "amount": -5}))
+
+
 class AgentLoopTests(unittest.TestCase):
     def test_full_run_with_correction(self):
         """המוח מנסה לסיים מוקדם, נדחה, מתקן תוכנית ומצליח."""
@@ -135,6 +158,24 @@ class ConversationTests(unittest.TestCase):
         r2 = agent.ask("ואיפה חרגתי?")
         self.assertEqual(r2["answer"], "חרגת ב-7 קטגוריות.")
         self.assertNotIn("error", r2["steps"][-1]["result"])  # ההוצאות נשארו טעונות מהתור הקודם
+
+    def test_holiday_flow_asks_for_amount_first(self):
+        """בקשה לחג בלי סכום: האג'נט שואל, ואחרי התשובה מחשב לפי הלוח העברי ובונה תוכנית מאומתת."""
+        client = FakeClient([
+            "כמה כסף תצטרכי לפסח?",
+            [call("holiday_countdown", holiday="פסח", amount=6000, today="2026-10-27"),
+             call("load_expenses", file_path=str(EXPENSES)), call("load_budget", file_path=str(BUDGET))],
+            [call("simulate_savings_plan", target=1000, cuts=[
+                {"category": "מסעדות ובתי קפה", "amount": 500}, {"category": "ביגוד", "amount": 500}])],
+            [call("finish", success=True, report="1,000 ש\"ח בחודש עד פסח")],
+        ])
+        agent = BudgetAgent(client, "fake", EXPENSES, BUDGET)
+        first = agent.ask("אני רוצה להתכונן לפסח")
+        self.assertFalse(first["finished"])                # שאלת הבהרה, לא תוכנית מומצאת
+        second = agent.ask("6,000 ש\"ח")
+        self.assertTrue(second["success"])
+        countdown = second["steps"][0]["result"]
+        self.assertEqual(countdown["monthly_saving_needed"], 1000)
 
     def test_finish_keeps_history_valid(self):
         """אחרי finish כל קריאה לכלי קיבלה תשובה, כך שאפשר להמשיך לשוחח."""
