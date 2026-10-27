@@ -1,7 +1,7 @@
 """
 בדיקות אוטומטיות - רצות בלי מפתח API.
 
-במקום OpenAI אמיתי משתמשים ב-FakeClient שמחזיר החלטות מוכנות מראש.
+במקום Gemini אמיתי משתמשים ב-FakeClient שמחזיר החלטות מוכנות מראש.
 כך בודקים שהלולאה, הכלים, הטיפול בשגיאות ותנאי הסיום עובדים נכון.
 
 הרצה:  python -m unittest discover tests -v
@@ -16,8 +16,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from agent import run_agent  # noqa: E402
-from chat_agent import ChatAgent  # noqa: E402
+from agent import BudgetAgent  # noqa: E402
 from tools import BudgetState, run_tool  # noqa: E402
 
 EXPENSES = ROOT / "data" / "expenses.csv"
@@ -45,10 +44,6 @@ class FakeClient:
         else:
             msg = SimpleNamespace(content=None, tool_calls=step)
         return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
-
-
-def silent_log(_text=""):
-    pass
 
 
 class ToolTests(unittest.TestCase):
@@ -99,10 +94,10 @@ class AgentLoopTests(unittest.TestCase):
             [call("finish", success=True, report="דוח סופי")],
         ]
         client = FakeClient(script)
-        result = run_agent("חסוך 1500", EXPENSES, BUDGET, client, "fake", 10, silent_log)
+        result = BudgetAgent(client, "fake", EXPENSES, BUDGET, max_steps=10).ask("חסוך 1500")
 
         self.assertTrue(result["success"])
-        self.assertEqual(result["steps"], 6)
+        self.assertEqual(result["rounds"], 6)
         self.assertTrue(result["plan"]["target_reached"])
         # בדיקה שהדחייה של הסיום המוקדם הגיעה למוח
         rejected = [m for m in client.seen_messages[3] if m["role"] == "tool" and "אי אפשר לסיים" in m["content"]]
@@ -110,18 +105,18 @@ class AgentLoopTests(unittest.TestCase):
 
     def test_stops_after_max_steps(self):
         client = FakeClient([])  # המוח "תקוע" וחוזר על אותו כלי
-        result = run_agent("חסוך", EXPENSES, BUDGET, client, "fake", 3, silent_log)
+        result = BudgetAgent(client, "fake", EXPENSES, BUDGET, max_steps=3).ask("חסוך")
         self.assertFalse(result["success"])
-        self.assertEqual(result["steps"], 3)
+        self.assertEqual(result["rounds"], 3)
 
     def test_honest_failure_is_allowed(self):
         client = FakeClient([[call("finish", success=False, report="היעד לא מציאותי")]])
-        result = run_agent("חסוך 9000", EXPENSES, BUDGET, client, "fake", 5, silent_log)
+        result = BudgetAgent(client, "fake", EXPENSES, BUDGET, max_steps=5).ask("חסוך 9000")
         self.assertFalse(result["success"])
-        self.assertEqual(result["steps"], 1)
+        self.assertEqual(result["rounds"], 1)
 
 
-class ChatAgentTests(unittest.TestCase):
+class ConversationTests(unittest.TestCase):
     def test_multi_turn_conversation(self):
         """שאלה פשוטה נענית בטקסט, ובהודעה הבאה האג'נט זוכר את מה שכבר נטען."""
         client = FakeClient([
@@ -131,9 +126,9 @@ class ChatAgentTests(unittest.TestCase):
             [call("load_budget", file_path=str(BUDGET)), call("compare_to_budget")],
             "חרגת ב-7 קטגוריות.",
         ])
-        agent = ChatAgent(client, "fake", EXPENSES, BUDGET)
+        agent = BudgetAgent(client, "fake", EXPENSES, BUDGET)
         steps_seen = []
-        r1 = agent.ask("כמה הוצאתי על מזון?", on_step=lambda n, a, r: steps_seen.append(n))
+        r1 = agent.ask("כמה הוצאתי על מזון?", on_step=lambda step, n, a, r: steps_seen.append(n))
         self.assertIn("3,028.90", r1["answer"])
         self.assertEqual(steps_seen, ["load_expenses", "get_transactions"])
 
@@ -144,7 +139,7 @@ class ChatAgentTests(unittest.TestCase):
     def test_finish_keeps_history_valid(self):
         """אחרי finish כל קריאה לכלי קיבלה תשובה, כך שאפשר להמשיך לשוחח."""
         client = FakeClient([[call("finish", success=False, report="אין מספיק נתונים")], "בבקשה"])
-        agent = ChatAgent(client, "fake", EXPENSES, BUDGET)
+        agent = BudgetAgent(client, "fake", EXPENSES, BUDGET)
         r = agent.ask("תוכנית?")
         self.assertTrue(r["finished"])
         self.assertEqual(agent.messages[-1]["role"], "tool")

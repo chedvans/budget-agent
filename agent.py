@@ -7,8 +7,10 @@
           עם base_url של Google ומפתח GEMINI_API_KEY.
   כלים  - פונקציות ב-tools.py: טעינת נתונים, השוואה לתקציב, פירוט עסקאות,
           איתור מנויים, ובדיקת תוכנית חיסכון.
-  לולאה - run_agent(): שולחת למוח את המצב, מריצה את הכלי שבחר, מחזירה לו
-          את התוצאה, וחוזר חלילה עד שהמוח קורא ל-finish או שנגמרו הצעדים.
+  לולאה - BudgetAgent.ask(): שולחת למוח את המצב, מריצה את הכלי שבחר, מחזירה לו
+          את התוצאה, וחוזר חלילה עד שהמוח עונה, קורא ל-finish, או שנגמרו הצעדים.
+
+אותה לולאה משמשת גם את הטרמינל (main בקובץ הזה) וגם את ממשק הצ'אט (app.py).
 
 הרצה:
     python agent.py
@@ -35,11 +37,7 @@ DEFAULT_MODEL = "gemini-3.5-flash-lite"
 REQUEST_TIMEOUT = 90  # שניות לכל בקשה למודל - כדי שהאג'נט לא ייתקע לנצח
 # כמה "לחשוב" לפני כל תשובה. low = מהיר וחסכוני, מספיק לבחירת כלים.
 REASONING_EFFORT = os.getenv("GEMINI_REASONING_EFFORT", "low")
-
-
-def _is_daily_quota(exc) -> bool:
-    text = str(exc)
-    return "PerDay" in text or "per day" in text
+MAX_STEPS = 15  # מקסימום סבבים מול המודל לבקשה אחת - הגנה מפני לולאה אינסופית
 DEFAULT_GOAL = "בדוק את ההוצאות שלי בחודש האחרון מול התקציב, ומצא תוכנית מציאותית לחסוך 1,500 ש\"ח בחודש הבא."
 
 SYSTEM_PROMPT = """אתה אג'נט לניהול תקציב משפחתי. אתה פועל רק באמצעות הכלים שברשותך.
@@ -59,7 +57,14 @@ SYSTEM_PROMPT = """אתה אג'נט לניהול תקציב משפחתי. אתה
 
 הדוח הסופי בעברית, קצר ומעשי: מצב נוכחי, היכן החריגות ומה גרם להן,
 התוכנית (קטגוריה, סכום, פעולה מעשית), וסך החיסכון.
-אם כלי מחזיר error - קרא אותו והחלט: תקן את הארגומנטים, או דווח על הבעיה."""
+אם כלי מחזיר error - קרא אותו והחלט: תקן את הארגומנטים, או דווח על הבעיה.
+
+השיחה יכולה להימשך לאורך כמה הודעות:
+- לשאלה על הנתונים (למשל "כמה הוצאתי על מזון?") - בדוק בכלים וענה בטקסט קצר, בלי finish.
+- לבקשה לתוכנית חיסכון - בצע את כל התהליך, אמת עם simulate_savings_plan וסיים ב-finish.
+- אם חסר מידע הכרחי (למשל לא ברור כמה לחסוך) - שאל את המשתמש בטקסט, אל תנחש.
+- אל תטען שוב קבצים שכבר נטענו בשיחה, אלא אם המשתמש ביקש.
+- אם הבקשה לא קשורה לתקציב והוצאות - אמור בנימוס שזה התחום שלך."""
 
 
 # ---------------------------------------------------------------------------
@@ -90,11 +95,16 @@ def _short(obj, limit: int = 600) -> str:
     return text if len(text) <= limit else text[:limit] + " ...[קוצר]"
 
 
+def _is_daily_quota(exc) -> bool:
+    text = str(exc)
+    return "PerDay" in text or "per day" in text
+
+
 # ---------------------------------------------------------------------------
 # המוח: קריאה ל-Gemini (דרך ספריית openai) עם ניסיונות חוזרים
 # ---------------------------------------------------------------------------
 
-def call_llm(client, model: str, messages: list[dict], log: RunLog, retries: int = 3):
+def call_llm(client, model: str, messages: list[dict], log, retries: int = 3):
     """שולח את השיחה למודל. בשגיאת רשת/עומס מנסה שוב, בשגיאת הרשאה עוצר."""
     import openai  # מיובא כאן כדי שהבדיקות ירוצו גם בלי הספרייה
 
@@ -131,7 +141,7 @@ def call_llm(client, model: str, messages: list[dict], log: RunLog, retries: int
                     raise SystemExit("חרגתם ממכסת הבקשות של Gemini (429). חכו דקה ונסו שוב, "
                                      "או בדקו את המכסה ב-AI Studio.") from exc
                 raise SystemExit(f"אין חיבור ל-Gemini ({type(exc).__name__}). "
-                                 "בדקו את חיבור האינטרנט והריצו את check_connection.py.") from exc
+                                 "בדקו את חיבור האינטרנט ונסו שוב.") from exc
             wait = 2 ** attempt
             log(f"   ! שגיאת תקשורת ({type(exc).__name__}), מנסה שוב בעוד {wait} שניות...")
             time.sleep(wait)
@@ -159,84 +169,89 @@ def _assistant_message(msg, tool_calls) -> dict:
 # הלולאה
 # ---------------------------------------------------------------------------
 
-def run_agent(goal: str, expenses_file: Path, budget_file: Path, client, model: str,
-              max_steps: int, log: RunLog) -> dict:
-    state = BudgetState()
-    messages: list[dict] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": (
-            f"המטרה: {goal}\n\n"
-            f"קובץ ההוצאות: {expenses_file}\n"
-            f"קובץ התקציב: {budget_file}"
-        )},
-    ]
+class BudgetAgent:
+    """
+    האג'נט. מחזיק את ההיסטוריה של השיחה ואת הנתונים שנטענו (state),
+    כך שאפשר לשלוח לו כמה הודעות ברצף והוא זוכר מה כבר נבדק.
+    """
 
-    log(f"מטרה: {goal}")
-    log(f"מודל: {model} | מקסימום צעדים: {max_steps}")
-    log("=" * 70)
+    def __init__(self, client, model: str, expenses_file: Path, budget_file: Path,
+                 max_steps: int = MAX_STEPS):
+        self.client = client
+        self.model = model
+        self.max_steps = max_steps
+        self.state = BudgetState()
+        self.messages: list[dict] = [{
+            "role": "system",
+            "content": SYSTEM_PROMPT + f"\n\nקובץ ההוצאות: {expenses_file}\nקובץ התקציב: {budget_file}",
+        }]
 
-    for step in range(1, max_steps + 1):
-        msg = call_llm(client, model, messages, log)
-        tool_calls = msg.tool_calls or []
+    def ask(self, user_text: str, on_step=None, on_log=None) -> dict:
+        """
+        מעביר הודעה אחת לאג'נט ומריץ את הלולאה עד שיש תשובה.
+        on_step(step, name, args, result) - נקרא אחרי כל כלי (להצגת הצעדים בזמן אמת).
+        on_log(text) - הודעות נוספות: מחשבות של המודל, ניסיונות חוזרים.
+        """
+        log = on_log or (lambda _t="": None)
+        self.messages.append({"role": "user", "content": user_text})
+        self.state.last_plan = None  # תוכנית מאומתת שייכת לבקשה הנוכחית בלבד
+        steps: list[dict] = []
 
-        # שומרים את ההחלטה של המודל בהיסטוריה
-        messages.append(_assistant_message(msg, tool_calls))
-        if msg.content:
-            log(f"[צעד {step}] מחשבה: {msg.content.strip()}")
+        for step in range(1, self.max_steps + 1):
+            msg = call_llm(self.client, self.model, self.messages, log)
+            tool_calls = msg.tool_calls or []
+            # שומרים את ההחלטה של המודל בהיסטוריה
+            self.messages.append(_assistant_message(msg, tool_calls))
 
-        if not tool_calls:
-            # המודל ענה בטקסט בלי לבחור כלי - מזכירים לו לעבוד עם הכלים או לסיים
-            log(f"[צעד {step}] המודל לא בחר כלי, מבקש ממנו להמשיך.")
-            messages.append({"role": "user", "content": "יש להמשיך באמצעות כלי, או לסיים עם finish."})
-            continue
+            if not tool_calls:
+                # המודל החליט לענות בטקסט (תשובה לשאלה, או שאלת הבהרה) - הבקשה הסתיימה
+                return {"answer": (msg.content or "").strip() or "(אין תשובה)", "steps": steps,
+                        "rounds": step, "finished": False, "success": None, "plan": None}
+            if msg.content:
+                log(f"[צעד {step}] מחשבה: {msg.content.strip()}")
 
-        for tc in tool_calls:
-            name = tc.function.name
-            try:
-                args = json.loads(tc.function.arguments or "{}")
-            except json.JSONDecodeError:
-                args = None
+            final = None
+            for tc in tool_calls:
+                name = tc.function.name
+                try:
+                    args = json.loads(tc.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    args = None
 
-            log(f"[צעד {step}] כלי: {name}({_short(args, 300) if args else ''})")
-
-            if args is None:
-                result = {"error": "הארגומנטים שנשלחו אינם JSON תקין."}
-
-            elif name == "finish":
-                # תנאי סיום עם בדיקה: לא מאשרים "הצלחה" שלא נבדקה בפועל
-                if args.get("success") and state.last_plan is None:
-                    result = {"error": "אי אפשר לסיים בהצלחה לפני ש-simulate_savings_plan "
-                                       "החזיר target_reached=true. בדוק את התוכנית."}
+                if args is None:
+                    result = {"error": "הארגומנטים שנשלחו אינם JSON תקין."}
+                elif name == "finish":
+                    # תנאי סיום עם בדיקה: לא מאשרים "הצלחה" שלא נבדקה בפועל
+                    if args.get("success") and self.state.last_plan is None:
+                        result = {"error": "אי אפשר לסיים בהצלחה לפני ש-simulate_savings_plan "
+                                           "החזיר target_reached=true. בדוק את התוכנית."}
+                    else:
+                        result = {"ok": True}
+                        final = args
                 else:
-                    log("=" * 70)
-                    log("הסתיים בהצלחה" if args.get("success") else "הסתיים ללא השגת היעד")
-                    log("")
-                    log(args.get("report", ""))
-                    return {"success": bool(args.get("success")), "steps": step,
-                            "report": args.get("report", ""), "plan": state.last_plan}
-            else:
-                result = run_tool(state, name, args)
+                    result = run_tool(self.state, name, args)
 
-            if "error" in result:
-                log(f"         -> שגיאה: {result['error']}")
-            else:
-                log(f"         -> {_short(result)}")
+                steps.append({"tool": name, "args": args, "result": result})
+                if on_step:
+                    on_step(step, name, args or {}, result)
+                # כל קריאה לכלי מקבלת תשובה בהיסטוריה (גם finish), כדי שהשיחה תוכל להימשך
+                self.messages.append({"role": "tool", "tool_call_id": tc.id,
+                                      "content": json.dumps(result, ensure_ascii=False)})
 
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": json.dumps(result, ensure_ascii=False),
-            })
+            if final is not None:
+                return {"answer": final.get("report", ""), "steps": steps, "rounds": step,
+                        "finished": True, "success": bool(final.get("success")),
+                        "plan": self.state.last_plan}
 
-    # תנאי עצירה: נגמרו הצעדים בלי שהמטרה הושגה
-    log("=" * 70)
-    log(f"האג'נט עצר אחרי {max_steps} צעדים בלי להשלים את המשימה.")
-    return {"success": False, "steps": max_steps,
-            "report": "המשימה לא הושלמה בתוך מספר הצעדים המותר.", "plan": state.last_plan}
+        # תנאי עצירה: נגמרו הצעדים בלי שהמשימה הושלמה
+        return {"answer": f"עצרתי אחרי {self.max_steps} צעדים בלי להשלים את הבקשה. "
+                          "נסו לנסח אותה בצורה ממוקדת יותר.",
+                "steps": steps, "rounds": self.max_steps, "finished": False,
+                "success": False, "plan": self.state.last_plan}
 
 
 # ---------------------------------------------------------------------------
-# נקודת כניסה
+# הרצה מהטרמינל
 # ---------------------------------------------------------------------------
 
 def main(argv: list[str] | None = None) -> int:
@@ -249,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expenses", default=str(DEFAULT_EXPENSES), help="קובץ CSV של הוצאות")
     parser.add_argument("--budget", default=str(DEFAULT_BUDGET), help="קובץ JSON של תקציב")
     parser.add_argument("--model", default=None, help="שם מודל Gemini (ברירת מחדל: GEMINI_MODEL מקובץ .env)")
-    parser.add_argument("--max-steps", type=int, default=15)
+    parser.add_argument("--max-steps", type=int, default=MAX_STEPS)
     parser.add_argument("--no-log", action="store_true", help="לא לשמור קובץ לוג בתיקיית runs")
     args = parser.parse_args(argv)
 
@@ -272,12 +287,28 @@ def main(argv: list[str] | None = None) -> int:
 
     from openai import OpenAI
     client = OpenAI(api_key=api_key, base_url=GEMINI_BASE_URL, timeout=REQUEST_TIMEOUT, max_retries=0)
+    agent = BudgetAgent(client, model, Path(args.expenses), Path(args.budget), args.max_steps)
 
     log_path = None if args.no_log else BASE_DIR / "runs" / f"run_{datetime.now():%Y%m%d_%H%M%S}.txt"
     log = RunLog(log_path)
+
+    def on_step(step, name, tool_args, result):
+        log(f"[צעד {step}] כלי: {name}({_short(tool_args, 300) if tool_args else ''})")
+        log(f"         -> שגיאה: {result['error']}" if "error" in result else f"         -> {_short(result)}")
+
+    log(f"מטרה: {args.goal}")
+    log(f"מודל: {model} | מקסימום צעדים: {args.max_steps}")
+    log("=" * 70)
     try:
-        result = run_agent(args.goal, Path(args.expenses), Path(args.budget),
-                           client, model, args.max_steps, log)
+        result = agent.ask(args.goal, on_step=on_step, on_log=log)
+        log("=" * 70)
+        if result["finished"]:
+            log("הסתיים בהצלחה" if result["success"] else "הסתיים ללא השגת היעד")
+            log("")
+        log(result["answer"])
+    except SystemExit as exc:  # מפתח, מודל או מכסה - הודעה ברורה
+        log(str(exc))
+        return 1
     except Exception as exc:  # שגיאה לא צפויה - מדווחים בצורה ברורה
         log(f"שגיאה בהרצת האג'נט: {type(exc).__name__}: {exc}")
         return 1

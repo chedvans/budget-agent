@@ -14,8 +14,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from agent import DEFAULT_BUDGET, DEFAULT_EXPENSES, DEFAULT_MODEL, GEMINI_BASE_URL, REQUEST_TIMEOUT
-from chat_agent import ChatAgent
+from agent import (DEFAULT_BUDGET, DEFAULT_EXPENSES, DEFAULT_MODEL, GEMINI_BASE_URL,
+                   REQUEST_TIMEOUT, BudgetAgent)
 from tools import BudgetState, run_tool
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -149,7 +149,7 @@ files_key = (str(expenses_file), str(budget_file), model)
 if new_chat or st.session_state.get("files_key") != files_key:
     from openai import OpenAI
     client = OpenAI(api_key=api_key, base_url=GEMINI_BASE_URL, timeout=REQUEST_TIMEOUT, max_retries=0)
-    st.session_state.agent = ChatAgent(client, model, expenses_file, budget_file)
+    st.session_state.agent = BudgetAgent(client, model, expenses_file, budget_file)
     st.session_state.history = []
     st.session_state.files_key = files_key
 
@@ -233,7 +233,7 @@ if prompt:
     with st.chat_message("assistant", avatar=BOT_AVATAR):
         status = st.status("מנתח את הנתונים...", expanded=show_steps)
 
-        def on_step(name, args, result):
+        def on_step(step, name, args, result):
             status.markdown(step_line(name, result))
 
         def on_log(text=""):
